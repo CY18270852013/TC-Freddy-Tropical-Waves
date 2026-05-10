@@ -1,6 +1,6 @@
 clear; clc;
 input_path = '\\DS1821\Observation\GPM\daily';
-output_path = 'E:\Results_of_Freddy_ChenYong_version2\GPM_anomaly_daily';
+output_path = 'E:\GPM_anomaly_daily';
 
 %% 步骤1: 计算15年平均值和标准化降水
 fprintf('步骤1: 计算15年平均值和标准化降水(30°S~30°N)\n');
@@ -156,7 +156,7 @@ end_idx = days(target_end_date - start_date) + 1; % 5478
 subset_normalized_precip = normalized_precip(:, :, start_idx:end_idx); % 600 * 3600 * 730
 nTime = size(subset_normalized_precip, 3); % 730
 fprintf('开始处理 %d 天的异常值计算 (30°S~30°N)...\n', nTime);
-fprintf('数据时间范围: %s 到 %s\n', datestr(target_start_date), datestr(target_end_date));
+fprintf('数据时间范围: % 到 %\n', datestr(target_start_date), datestr(target_end_date));
 
 target_dates = target_start_date:target_end_date;
 anomaly_data = zeros(nLat_selected, nLon, nTime, 'single'); % 600 * 3600 * 730
@@ -206,6 +206,6 @@ ncwriteatt(anomaly_file, '/', 'units', 'mm');
 ncwriteatt(anomaly_file, '/', 'long_name', 'Daily precipitation anomaly');
 ncwriteatt(anomaly_file, '/', 'method', '15-year mean removed + FFT filtering (first 3 harmonics)');
 
-fprintf('异常值文件保存完成: %s\n', anomaly_file);
+fprintf('异常值文件保存完成: %\n', anomaly_file);
 fprintf('所有处理完成！纬度范围: 30°S ~ 30°N\n');
 clear normalized_precip original_daily_precipitation subset_normalized_precip fit_climatology;
