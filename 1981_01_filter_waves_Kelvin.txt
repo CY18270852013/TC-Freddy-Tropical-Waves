@@ -1,0 +1,353 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; filter_waves.ncl
+; Carl Schreck (carl@cicsnc.org) February 2011
+; Updated by Beata Latos (blatos@igf.edu.pl) January 2020
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Description: Filter data for each equatorial wave type
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_code.ncl"
+;load         "/usr/lib/ncarg/nclscripts/csm/gsn_code.ncl/"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/gsn_csm.ncl"
+;load         "/usr/lib/ncarg/nclscripts/csm/gsn_csm.ncl/"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/contributed.ncl"
+;load         "/usr/lib/ncarg/nclscripts/csm/contributed.ncl/"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/csm/shea_util.ncl"
+;load         "/usr/lib/ncarg/nclscripts/csm/shea_util.ncl/"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/wrf/WRFUserARW.ncl"
+;load         "/usr/lib/ncarg/nclscripts/wrf/WRFUserARW.ncl/"
+load "$NCARG_ROOT/lib/nacre/nclscripts/csm/diagnostics_cam.ncl"
+;load         "/usr/lib/ncarg/nclscripts/csm/diagnostics_cam.ncl/"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/time_axis_labels.ncl"
+;load         "/usr/lib/ncarg/nclscripts/contrib/time_axis_labels.ncl/"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/kf_filter.ncl"
+;load         "/usr/lib/ncarg/nclscripts/contrib/kf_filter.ncl/"
+load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/ut_string.ncl"
+;load         "/usr/lib/ncarg/nclscripts/contrib/ut_string.ncl/"
+;load "~/lib/print_clock.ncl"
+;load        "/usr/lib/ncarg/nclscripts/csm/gsn_code.ncl/"
+
+begin
+   
+  print_clock( "Here we go!" )
+
+; These are some parameters that could be useful to have up top
+  mis = -32767
+  mis@_FillValue = -32767
+
+  ymin    =  20       ;15 ;latitude
+  ymax    =    -20    ;-15 ; latitude
+
+  obsPerDay = 1 ; important! Number of observations per day
+  if( .not.isvar("varIn") ) then
+    varIn = "anomalies" 
+  end if
+  print( varIn )
+  
+
+  pathIn = "1981_01_Kelvin.nc"
+  pathOut = "1981_01_waves_Kelvin.nc"
+
+
+  wk99 = False ; True uses the original Wheeler-Kiladis filters,
+               ; False uses slight modifications from recent papers
+  calcHigh = False ; Choose waves types
+  calcLow = False;
+  calcMrg = True;
+  calcMjo = False;
+  calcKelvin = True;
+  calcEr = False;
+  calcMtd = False
+  calcTd = False
+  makeNewFile = True
+
+
+; Open the input files
+  fin  = addfile( pathIn, "r" )
+  time = fin->time
+  lat  = fin->lat({ymin:ymax})
+  lon  = fin->lon
+
+
+  lat@actual_range = (/ min(lat), max(lat) /)
+
+; Open the output files
+  setfileoption( "nc", "Format", "LargeFile" )
+  if( makeNewFile ) then
+    system( "rm " + pathOut )
+    fout  = addfile( pathOut, "c" )
+    fout->time = time
+    fout->lat  = lat
+    fout->lon  = lon
+  else
+    fout  = addfile( pathOut, "w" )
+  end if
+
+  print_clock( "Reading the input data... " )
+
+  data = fin->$varIn$(:,{ymin:ymax},:)
+  data&time@beginning_date = ut_string( data&time(0), "" )
+  data&time@ending_date    = ut_string( data&time(dimsizes(data&time)-1), "" )
+
+  if( any( ismissing(data) ) ) then
+    print_clock( "WARNING: Setting missing data to zero" )
+    data = where( ismissing(data), 0, data )
+  end if
+
+  printVarSummary(data)
+
+  if( calcHigh ) then
+    print_clock( "Filtering High..." )
+
+    high = data
+    high@long_name      = "High frequency"
+    high@filter         = "Highpass time filter"
+    high@wavenumber     = (/ -9999,  9999 /)
+    high@period         = (/ 1, 2.5 /)
+    high@depth          = (/ mis, mis /)
+
+    do y = 0, ( dimsizes(lat) - 1 )
+  ;    print_clock( y + " " + ( dimsizes(lat) - 1 ) + " " )
+
+      high(time|:,{lat|lat(y)},lon|:) = (/ kf_filter(  \\
+         data(time|:,{lat|lat(y)},lon|:), obsPerDay,  \\
+         high@period(0),     high@period(1),     \\
+         high@wavenumber(0), high@wavenumber(1), \\
+         high@depth(0),      high@depth(1),      \\
+         "none" ) /)
+
+    end do
+
+    print_clock( "Writing High... " )
+    fout->high = high
+    delete(high)
+  end if
+
+
+  if( calcLow ) then
+    print_clock( "Filtering Low..." )
+
+    low = data
+    low@long_name      = "Low frequency"
+    low@filter         = "Lowpass time filter"
+    low@wavenumber     = (/ -9999,  9999 /)
+    low@period         = (/ 120, 9999 /)
+    low@depth          = (/ mis, mis /)
+
+    do y = 0, ( dimsizes(lat) - 1 )
+  ;    print_clock( y + " " + ( dimsizes(lat) - 1 ) + " " )
+
+      low(time|:,{lat|lat(y)},lon|:) = (/ kf_filter(  \\
+         data(time|:,{lat|lat(y)},lon|:), obsPerDay,  \\
+         low@period(0),     low@period(1),     \\
+         low@wavenumber(0), low@wavenumber(1), \\
+         low@depth(0),      low@depth(1),      \\
+         "none" ) /)
+
+    end do
+
+    print_clock( "Writing Low... " )
+    fout->low = low
+    delete(low)
+  end if
+
+
+  if( calcMrg ) then
+    print_clock( "Filtering MRG..." )
+
+    mrg = data
+    mrg@long_name     = "Mixed Rossby-Gravity Waves in " + str_upper(varIn)
+    mrg@filter        = "Wheeler & Kiladis (1999)"
+    mrg@wavenumber    = (/  -10,  -1 /)
+    mrg@period        = (/    3,  96 /)
+    mrg@depth         = (/    8,  90 /)
+
+    do y = 0, ( dimsizes(lat) - 1 )
+;    print_clock( y + " " + ( dimsizes(lat) - 1 ) + " " )
+
+      mrg(time|:,{lat|lat(y)},lon|:) = (/ kf_filter(  \\
+         data(time|:,{lat|lat(y)},lon|:), obsPerDay,  \\
+         mrg@period(0),     mrg@period(1),     \\
+         mrg@wavenumber(0), mrg@wavenumber(1), \\
+         mrg@depth(0),      mrg@depth(1),      \\
+         "mrg" ) /)
+
+    end do
+
+    print_clock( "Writing MRG... " )
+    fout->mrg = mrg
+    delete(mrg)
+  end if
+
+
+  if( calcMjo ) then
+    print_clock( "Filtering MJO..." )
+
+    mjo = data
+    mjo@long_name     = "Madden-Julian Oscillation in " + str_upper(varIn)
+    if( wk99 ) then
+      mjo@filter        = "Wheeler & Kiladis (1999)"
+      mjo@wavenumber    = (/   1,   5 /)
+;     mjo@wavenumber    = (/   0,   9 /)
+      mjo@period        = (/  30,  96 /)
+      mjo@depth         = (/ mis, mis /)
+    else
+      mjo@filter        = "Kiladis et al. (2005 JAS)"
+      mjo@wavenumber    = (/   0,   9 /)
+      mjo@period        = (/  20, 100 /)
+      mjo@depth         = (/ mis, mis /)
+    end if
+
+    do y = 0, ( dimsizes(lat) - 1 )
+  ;    print_clock( y + " " + ( dimsizes(lat) - 1 ) + " " )
+
+    mjo(time|:,{lat|lat(y)},lon|:) = (/ kf_filter(  \\
+       data(time|:,{lat|lat(y)},lon|:), obsPerDay,  \\
+       mjo@period(0),     mjo@period(1),     \\
+       mjo@wavenumber(0), mjo@wavenumber(1), \\
+       mjo@depth(0),      mjo@depth(1),      \\
+       "none" ) /)
+
+    end do
+
+    print_clock( "Writing MJO... " )
+    fout->mjo = mjo
+    delete(mjo)
+  end if
+
+
+  if( calcKelvin ) then
+    print_clock( "Filtering KELVIN..." )
+
+    kelvin = data
+    kelvin@long_name  = "Kelvin Waves in " + str_upper(varIn)
+    if( wk99 ) then
+      kelvin@filter     = "Wheeler & Kiladis (1999)"
+      kelvin@wavenumber = (/   1,  14 /)
+      kelvin@period     = (/ 2.5,  30 /)
+      kelvin@depth      = (/   8,  90 /)
+    else
+      kelvin@filter     = "Straub & Kiladis (2002)"
+      kelvin@wavenumber = (/   1,  14 /)
+      kelvin@period     = (/ 2.5,  17 /)
+      kelvin@depth      = (/   5,  90 /)
+    end if
+
+    do y = 0, ( dimsizes(lat) - 1 )
+  ;    print_clock( y + " " + ( dimsizes(lat) - 1 ) + " " )
+
+      kelvin(time|:,{lat|lat(y)},lon|:) = (/ kf_filter(  \\
+         data(time|:,{lat|lat(y)},lon|:), obsPerDay,  \\
+         kelvin@period(0),     kelvin@period(1),     \\
+         kelvin@wavenumber(0), kelvin@wavenumber(1), \\
+         kelvin@depth(0),      kelvin@depth(1),      \\
+         "kelvin" ) /)
+
+    end do
+
+printVarSummary(kelvin)
+printVarSummary(data)
+
+    print_clock( "Writing KELVIN... " )
+    fout->kelvin = kelvin
+    delete(kelvin)
+  end if
+
+
+  if( calcEr ) then
+    print_clock( "Filtering ER..." )
+
+    er = data
+    er@long_name      = "Equatorial Rossby Waves in " + str_upper(varIn)
+    if( wk99 ) then
+      er@filter         = "Wheeler & Kiladis (1999)"
+      er@wavenumber     = (/ -10,  -1 /)
+      er@period         = (/ 9.7,  48 /)
+      er@depth          = (/   8,  90 /)
+    else
+      er@filter         = "Kiladis et al. (2009 Rev. Geophys.)"
+      er@wavenumber     = (/ -10,  -1 /)
+      er@period         = (/ 9.7,  48 /)
+      er@depth          = (/   5,  90 /)
+    end if
+
+    do y = 0, ( dimsizes(lat) - 1 )
+  ;    print_clock( y + " " + ( dimsizes(lat) - 1 ) + " " )
+
+      er(time|:,{lat|lat(y)},lon|:) = (/ kf_filter(  \\
+         data(time|:,{lat|lat(y)},lon|:), obsPerDay,  \\
+         er@period(0),     er@period(1),     \\
+         er@wavenumber(0), er@wavenumber(1), \\
+         er@depth(0),      er@depth(1),      \\
+         "er" ) /)
+
+    end do
+
+    print_clock( "Writing ER... " )
+    fout->er = er
+    delete(er)
+  end if
+
+  if( calcMtd ) then
+    print_clock( "Filtering MRG/TD..." )
+
+    td = data
+    td@long_name      = "MRG/TD in " + str_upper(varIn)
+    td@filter         = "Frank and Roundy (2006), extended to wavenumber -20"
+    td@wavenumber     = (/ -20,  -0 /)
+    td@period         = (/ 2.5,  10 /)
+    td@depth          = (/  mis, mis /)
+
+    do y = 0, ( dimsizes(lat) - 1 )
+  ;    print_clock( y + " " + ( dimsizes(lat) - 1 ) + " " )
+
+      td(time|:,{lat|lat(y)},lon|:) = (/ kf_filter(  \\
+         data(time|:,{lat|lat(y)},lon|:), obsPerDay,  \\
+         td@period(0),     td@period(1),     \\
+         td@wavenumber(0), td@wavenumber(1), \\
+         td@depth(0),      td@depth(1),      \\
+         "none" ) /)
+
+    end do
+
+    print_clock( "Writing TD... " )
+    fout->td = td
+    delete(td)
+  end if
+
+
+  if( calcTd ) then
+    print_clock( "Filtering TD..." )
+
+    td = data
+    td@long_name      = "TD-type Disturbances in " + str_upper(varIn)
+    td@filter         = "Roundy and Frank (2004), extended to wavenumber -20"
+    td@wavenumber     = (/ -16,  -6 /) ; used to be -20 !!! 
+    td@period         = (/ 2,   5 /) ; used to be 2.5 !!!! 
+    td@depth          = (/  90, mis /)
+
+    do y = 0, ( dimsizes(lat) - 1 )
+  ;    print_clock( y + " " + ( dimsizes(lat) - 1 ) + " " )
+
+      td(time|:,{lat|lat(y)},lon|:) = (/ kf_filter(  \\
+         data(time|:,{lat|lat(y)},lon|:), obsPerDay,  \\
+         td@period(0),     td@period(1),     \\
+         td@wavenumber(0), td@wavenumber(1), \\
+         td@depth(0),      td@depth(1),      \\
+         "none" ) /)
+
+    end do
+
+    print_clock( "Writing TD... " )
+    fout->td = td
+    delete(td)
+  end if
+
+
+  print_clock( "Closing file..." )
+  delete(fout)
+
+  print_clock( "Thank you, come again. " )
+
+end ; filter_waves_ERA5
+
